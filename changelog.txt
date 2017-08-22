@@ -1,0 +1,7 @@
+
+CatFeeder 1.0  March 16, 2016
+-----------------------------
+* control unit via wifi/web
+* sync time from Intenet at start up
+* save timetable in EEPROM
+

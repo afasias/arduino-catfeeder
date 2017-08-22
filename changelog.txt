@@ -1,4 +1,11 @@
 
+CatFeeder 3.0  September 3, 2016
+--------------------------------
+* improved time keeping
+* hard-coded timetable (instead of EEPROM timetable)
+* removed control via serial port
+* added real-time clock
+
 CatFeeder 2.0  August 28, 2016
 ------------------------------
 * removed bogus wifi support

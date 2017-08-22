@@ -1,188 +1,70 @@
-#include <avr/pgmspace.h>
-#include <SoftwareSerial.h>
 #include <EEPROM.h>
 #include <Servo.h>
-
-#define ESP8266_RX    A0
-#define ESP8266_TX    A1
 
 #define SERVO_PIN     A2
 
 #define PRINT_VAR(XYZ)     Serial.print(#XYZ" = ");Serial.println(XYZ)
 
-#define COMMAND_MUX           0
-#define COMMAND_SERVER        1
-#define COMMAND_CLOSE         2
-#define COMMAND_PREPARE_PAGE  3
-#define COMMAND_SEND_PAGE     4
-#define COMMAND_CONNECT_TIME  5
-#define COMMAND_SEND_TIME1    6
-#define COMMAND_SEND_TIME2    7
-#define COMMAND_CIFSR         8
-
+#define MAX_TIME_TABLE_ENTRIES    10
 #define SERVO_MAX_FORWARD_MILLIS  1200
 #define SERVO_REVERSE_MILLIS      300
 #define SERVO_TREAT_MILLIS        1500
 
-#define ESP_READ_TIMEOUT          500
-
-/* type definitions */
-
-struct Command {
-  uint8_t id;
-  uint8_t mux_id;
-  Command *next;
+struct time_table_entry {
+  int hour;
+  int minute;
+  int duration;
 };
-
-struct Sched {
-  uint32_t time;
-  uint8_t dur;
-};
-
-/* global vars */
 
 Servo myServo;
-SoftwareSerial esp(ESP8266_RX,ESP8266_TX);
-Command *commands = NULL;
-Sched schedule[4];
-uint8_t schedule_size = 0;
-bool treat = false;
-uint32_t prev_reset_ts = time_of_day();
+time_table_entry time_table[MAX_TIME_TABLE_ENTRIES];
+int time_table_entries = 0;
 
-/* buffered reading */
-
-char *espReadLine() {
-  static char buffer[128];
-  static int pos = 0;
-  uint32_t ts = millis();
-  while ((millis() - ts) < ESP_READ_TIMEOUT) {
-    while (esp.available() && (pos < (sizeof(buffer)-1))) {
-      char ch = esp.read();
-      if (ch != '\n' && ch != '\r') {
-        buffer[pos++] = ch;
-      }
-      if (ch == '\n' || !(pos < (sizeof(buffer)-1))) {
-        buffer[pos] = 0;
-        pos = 0;
-//        PRINT_VAR(buffer);
-        return buffer;  
-      }
-    }
-  }
-  return NULL;
-}
-
-void readEspInput() {
-  char *st;
-  bool flag = false;
-  while ((st = espReadLine()) != NULL) {
-    PRINT_VAR(st);
-    if (! strncmp(st,"+IPD,",5)) {
-      int id = atoi(st+5);
-      char *query = strstr(st,":GET ");
-      if (query != NULL) {
-        dispatchRequest(id,query+5);
-        continue;
-      }
-      query = strstr(st,":time_of_day=");
-      if (query != NULL) {
-        set_time_of_day(atol(query+13));
-      }
-    }
-  }
-}
-
-/* commands */
-
-void queueCommand( uint8_t id, uint8_t mux_id ) {
-  Command *command = new Command();
-  command->id = id;
-  command->mux_id = mux_id;
-  command->next = NULL;
-  if (commands == NULL) {
-    commands = command;
-  } else {
-    Command *last = commands;
-    while (last->next != NULL) last = last->next;
-    last->next = command;
-  }
-}
-
-/* time functions */
-
-uint32_t calculate_time( uint8_t h, uint8_t m, uint8_t s ) {
-  return (uint32_t)h * 3600 + m * 60 + s;
-}
-
-char time_to_str[9];
-char *time_to_str_sec( uint32_t tm ) {
-  int min = tm / 60;
-  tm %= 60;
-  int hour = min / 60;
-  min %= 60;
-  sprintf(time_to_str,"%02d:%02d:%02d",hour,min,tm);
-  return time_to_str;
-}
-
-char *time_to_str_nosec( uint32_t tm ) {
-    int min = tm / 60;
-    int hour = min / 60;
-    min %= 60;
-    sprintf(time_to_str,"%02d:%02d",hour,min);
-    return time_to_str;
-}
-
-uint32_t time_of_day_millis = 0;
+int set_time = 0;
 uint32_t set_time_millis = 0;
-uint32_t prev_time = time_of_day();
 
-uint32_t time_of_day() {
+int time_of_day() {
   uint32_t ts_millis = millis();
   uint32_t dt_millis = set_time_millis > ts_millis ? 1 + set_time_millis + ~ts_millis : ts_millis - set_time_millis;
-  time_of_day_millis = (time_of_day_millis + dt_millis) % 86400000;
-//  PRINT_VAR(time_of_day_millis);
-  set_time_millis = ts_millis;
-  return time_of_day_millis/1000;
+  int time_of_day = (set_time + dt_millis/60000) % 1440;
+  if (dt_millis > 86400000) {
+    set_time = time_of_day;
+    set_time_millis = ts_millis;
+  }
+  return time_of_day;
 }
 
-void set_time_of_day(uint32_t time_of_day) {
+void set_time_of_day(int time_of_day) {
   set_time_millis = millis();
-  time_of_day_millis = time_of_day * 1000;
-  PRINT_VAR(time_of_day_millis);
-  if (! (prev_time = time_of_day)) {
-    prev_time = 86399;
-    prev_reset_ts = 86399;
-  }
+  set_time = time_of_day;
 }
 
-/* schedule */
-
-void store_schedule() {
+void save_time_table() {
   int addr = 0;
-  EEPROM.put(addr,schedule_size);
-  addr += sizeof(schedule_size);
-  for (int i = 0; i < schedule_size; i++) {
-    EEPROM.put(addr,schedule[i]);
-    addr += sizeof(schedule[i]);
+  EEPROM.put(addr,time_table_entries);
+  addr += sizeof(time_table_entries);
+  for (int i = 0; i < time_table_entries; i++) {
+    EEPROM.put(addr,time_table[i]);
+    addr += sizeof(time_table[i]);
   }
 }
 
-void load_schedule() {
+void load_time_table() {
   int addr = 0;
-  EEPROM.get(addr,schedule_size);
-  addr += sizeof(schedule_size);
-  if (schedule_size > 4) {
-    schedule_size = 4;
+  EEPROM.get(addr,time_table_entries);
+  addr += sizeof(time_table_entries);
+  if (time_table_entries > MAX_TIME_TABLE_ENTRIES) {
+    time_table_entries = MAX_TIME_TABLE_ENTRIES;
   }
-  for (int i = 0; i < schedule_size; i++) {
-    EEPROM.get(addr,schedule[i]);
-    schedule[i].time %= 86400;
-    schedule[i].dur %= 99;
-    addr += sizeof(schedule[i]);
+  for (int i = 0; i < time_table_entries; i++) {
+    EEPROM.get(addr,time_table[i]);
+    time_table[i].hour %= 24;
+    time_table[i].minute %= 60;
+    time_table[i].duration %= 10;
+    addr += sizeof(time_table[i]);
   }
-}
 
-/* servo control */
+}
 
 void servo_control(int8_t status) {
   if (! status) {
@@ -213,197 +95,135 @@ void servo_activate(int ms) {
   servo_control(0);
 }
 
-void update_servo() {
-  if (treat) {
-    treat = false;
-    servo_activate(SERVO_TREAT_MILLIS);
+void do_servo() {
+  static int last_activation = -1;
+  int time = time_of_day();
+  if (time == last_activation) {
     return;
   }
-//  PRINT_VAR(prev_time);
-  uint32_t time = time_of_day();
-//  PRINT_VAR(time);
-  bool overflow = prev_time > time;
-//  PRINT_VAR(overflow);
-  for (int i = 0; i < schedule_size; i++) {
-//    PRINT_VAR(i);
-//    PRINT_VAR(schedule[i].time);
-    if ((overflow || (prev_time < schedule[i].time)) && (schedule[i].time <= time)) {
-      servo_activate(schedule[i].dur*1000);
+  int h = time / 60;
+  int m = time % 60;
+  for (int i = 0; i < time_table_entries; i++) {
+    if (time_table[i].hour == h && time_table[i].minute == m) {
+      servo_activate(time_table[i].duration*1000);
+      last_activation = time;
       break;
     }
   }
-  prev_time = time;
 }
 
-/* time and networking */
-
-void update_time_and_network() {
-//  PRINT_VAR(prev_time);
-  uint32_t ts = time_of_day();
-  uint32_t dt = prev_reset_ts > ts ? 1 + prev_reset_ts + ~ts : ts - prev_reset_ts;
-  PRINT_VAR(dt);
-  if (dt > 3600) {
-    Serial.println("RESETING");
-    queueCommand(COMMAND_SERVER,0);
-    queueCommand(COMMAND_CONNECT_TIME,0);
-    queueCommand(COMMAND_SEND_TIME1,0);
-    queueCommand(COMMAND_SEND_TIME2,0);
-    prev_reset_ts = ts;
-  }
+void print_help() {
+  Serial.println("Command set");
+  Serial.println("-----------");
+  Serial.println("t           : Display time");
+  Serial.println("t HH:MM     : Set time");
+  Serial.println("l           : List time table");
+  Serial.println("a HH:MM DUR : Add ne time table entry");
+  Serial.println("clear       : Clear time table");
+  Serial.println("save        : Save changes");
+  Serial.println("discard     : Discard changes");
+  Serial.println("treat       : Serve a treat");
 }
 
-/* web request dispatcher */
-
-char *decodeUrl(char *q) {
-  char *cp, *cp2;
-  for (cp = q, cp2 = q; *cp; cp++,cp2++) {
-    if (*cp == '+') {
-      *cp2 = ' ';
-    } else if (*cp == '%') {
-      if (cp[1] == '\0' || cp[2] == '\0') {
-        break;
-      } else if (cp[1] == '3' && cp[2] == 'A') {
-        *cp2 = ':';
-      } else if (cp[1] == '0' && (cp[2] == 'D' || cp[2] == 'A')) {
-        *cp2 = ' ';
-      }
-      cp += 2;
-    } else {
-      *cp2 = *cp;
+void print_time_table() {
+  if (time_table_entries > 0) {
+    Serial.println("Time table:");
+    char st[32];
+    for (int i = 0; i < time_table_entries; i++) {
+      time_table_entry *en = time_table + i;
+      sprintf(st,"%2d:%02d -> %d sec", en->hour, en->minute, en->duration );
+      Serial.println(st);
     }
+  } else {
+    Serial.println("Time table empty.");
   }
-  *cp2 = '\0';
-  return q;
 }
 
-void dispatchRequest( int id, char *query ) {
-  decodeUrl(query);
-  PRINT_VAR(query);
-  if (strstr(query,"/favicon")) {
-    queueCommand(COMMAND_CLOSE,id);
-    return;
-  }
-  int h[4], m[4], s[1], d[4];
-  int res;
-  if ((res = sscanf(query,"/?time=%d:%d:%d",h,m,s)) >= 2) {
-    set_time_of_day(calculate_time(h[0],m[0],res > 2 ? s[0] : 0));
-  } else if ((res = sscanf(query,"/?schedule=%d:%d %d %d:%d %d %d:%d %d %d:%d %d",h+0,m+0,d+0,h+1,m+1,d+1,h+2,m+2,d+2,h+3,m+3,d+3)) >=3) {
-    schedule_size = res/3;
-    for (int i = 0; i < schedule_size; i++) {
-      schedule[i].time = calculate_time(h[i],m[i],0);
-      schedule[i].dur = d[i];
-    }
-    store_schedule();
-  } else if (!strncmp(query,"/?treat=1",8)) {
-    treat = true;
-  }
-  queueCommand(COMMAND_PREPARE_PAGE,id);
+void print_time_of_day() {
+  char st[16];
+  int time = time_of_day();
+  sprintf(st,"%d:%02d",  time / 60, time % 60);
+  Serial.println(st);
 }
-
-/* command dispatcher */
-
-char resp[] =
-  "<html>"
-    "<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=2.0, maximum-scale=2.0, user-scalable=no\"></head>"
-    "<body>"
-      "<h3><a href=\"/\">Cat Feeder</a></h3>"
-      "<form method=\"GET\">"
-        "<p>Time:</p>"
-        "<p><input type=\"text\" name=\"time\" value=\"@       \" maxlength=\"8\" size=\"8\"><input type=\"submit\"></p>"
-      "</form>"
-      "<form method=\"GET\">"
-        "<p>Schedule:</p>"
-        "<p><textarea name=\"schedule\" rows=\"4\" cols=\"8\">#                                               </textarea></p>"
-        "<p><input type=\"submit\"></p>"
-      "</form>"
-      "<form method=\"GET\">"
-        "<p>Treat:<input type=\"checkbox\" name=\"treat\" value=\"1\"><input type=\"submit\"></p>"
-      "</form>"
-    "</body>"
-  "</html>";
-char *timep = strchr(resp,'@');
-char *tblp = strchr(resp,'#');
-
-void dispatchTopmostCommand() {
-  char *tmstr, *ptr;
-  if (commands != NULL) {
-    switch (commands->id) {
-      case COMMAND_MUX:
-        esp.write("AT+CIPMUX=1\r\n");
-        break;
-      case COMMAND_SERVER:
-        esp.write("AT+CIPSERVER=1,80\r\n");
-        break;
-      case COMMAND_CIFSR:
-        esp.write("AT+CIFSR\r\n");
-        break;
-      case COMMAND_CLOSE:
-        esp.write("AT+CIPCLOSE=");
-        esp.print(commands->mux_id);
-        esp.write("\r\n");
-        break;
-      case COMMAND_PREPARE_PAGE:
-        tmstr = time_to_str_sec(time_of_day());
-        memcpy(timep,tmstr,8);
-        memset(tblp,' ',48);
-        ptr = tblp;
-        for (int i = 0; i < schedule_size; i++) {
-          tmstr = time_to_str_nosec(schedule[i].time);
-          memcpy(ptr,tmstr,5);
-          ptr += 6;
-          char ch[4];
-          sprintf(ch,"%d",schedule[i].dur);
-          memcpy(ptr,ch,strlen(ch));
-          ptr += strlen(ch);
-          *ptr++ = '\n';
+void do_serial() {
+  if (Serial.available()) {
+    String st = Serial.readString();
+    st.trim();
+    if (st == "l") {
+      print_time_table();
+    } else if (st == "treat") {
+      Serial.println("STARTING TREAT...");
+      servo_activate(SERVO_TREAT_MILLIS);
+      Serial.println("Done.");
+    } else if (st == "clear") {
+      time_table_entries = 0;
+      print_time_table();
+    } else if (st == "save") {
+      save_time_table();
+      Serial.println("Saved time table into EEPROM");
+    } else if (st == "discard") {
+      load_time_table();
+      print_time_table();
+    } else if (st.startsWith("a ")) {
+      int h, m, d;
+      if (sscanf(st.c_str()+2,"%d:%d %d",&h,&m,&d) == 3) {
+        if (time_table_entries >= MAX_TIME_TABLE_ENTRIES) {
+          Serial.println("Too many entries!");
+        } else {
+          time_table[time_table_entries].hour = h;
+          time_table[time_table_entries].minute = m;
+          time_table[time_table_entries].duration = d;
+          time_table_entries++;
+          print_time_table();
         }
-        esp.write("AT+CIPSEND=");
-        esp.print(commands->mux_id);
-        esp.write(",");
-        esp.print(strlen(resp));
-        esp.write("\r\n");
-        queueCommand(COMMAND_SEND_PAGE,commands->mux_id);
-        break;
-      case COMMAND_SEND_PAGE:
-        esp.write(resp);
-        queueCommand(COMMAND_CLOSE,commands->mux_id);
-        break;
-      case COMMAND_CONNECT_TIME:
-        esp.write("AT+CIPSTART=0,\"TCP\",\"212.71.251.50\",80\n\n");
-        break;
-      case COMMAND_SEND_TIME1:
-        esp.write("AT+CIPSEND=0,22\r\n");
-        break;
-      case COMMAND_SEND_TIME2:
-        esp.write("GET /time_of_day.php\r\n");
-        break;
+      } else {
+          print_help();
+      }
+    } else if (st == "t") {
+      print_time_of_day();
+    } else if (st.startsWith("t ")) {
+      int h, m;
+      if (sscanf(st.c_str()+2,"%d:%d",&h,&m) == 2) {
+        set_time_of_day(h*60+m);
+        Serial.print("New time: ");
+        print_time_of_day();
+      } else {
+          print_help();
+      }
+    } else {
+      Serial.print("Unknown command: ");
+      Serial.println(st);
+      print_help();
     }
-    Command *next = commands->next;
-    delete commands;
-    commands = next;
   }
 }
 
-/* --------------- */
+void wait_for_serial_data() {
+  pinMode(13, OUTPUT);
+  digitalWrite(13,HIGH);
+  uint32_t ts = millis();
+  uint8_t status = HIGH;
+  while (!Serial.available()) {
+    if ((millis()-ts) > 500) {
+      digitalWrite(13,status ^= 1);
+      ts = millis();
+    }
+    do_servo();
+  }
+  digitalWrite(13,LOW);
+}
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial);
-  load_schedule();
-  esp.begin(9600);
-  queueCommand(COMMAND_MUX,0);
-  queueCommand(COMMAND_CONNECT_TIME,0);
-  queueCommand(COMMAND_SEND_TIME1,0);
-  queueCommand(COMMAND_SEND_TIME2,0);
-  queueCommand(COMMAND_SERVER,0);
-  queueCommand(COMMAND_CIFSR,0);
+  Serial.setTimeout(100);
+  load_time_table();
+  wait_for_serial_data();
 }
 
 void loop() {
-  readEspInput();
-  dispatchTopmostCommand();
-  update_servo();
-  update_time_and_network();
+  do_serial();
+  do_servo();
 }
 
 

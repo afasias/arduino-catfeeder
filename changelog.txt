@@ -1,4 +1,11 @@
 
+CatFeeder 2.0  August 28, 2016
+------------------------------
+* removed bogus wifi support
+* improved time keeping
+* programmable via serial port
+* added "time is not set" indicator
+
 CatFeeder 1.0  March 16, 2016
 -----------------------------
 * control unit via wifi/web

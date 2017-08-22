@@ -1,0 +1,7 @@
+
+#define TREAT_SERVING_MILLIS      1500
+#define MAX_TABLE_SIZE            12
+#define SERVO_MAX_FORWARD_MILLIS  1200
+#define SERVO_REVERSE_MILLIS      300
+
+

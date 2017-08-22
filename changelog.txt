@@ -1,4 +1,9 @@
 
+CatFeeder 4.0  October 20, 2016
+-------------------------------
+* save timetable in EEPROM (again...)
+* programmable via Infrared remote and LCD screen
+
 CatFeeder 3.0  September 3, 2016
 --------------------------------
 * improved time keeping

@@ -53,5 +53,11 @@ void io_init() {
   irrecv.enableIRIn();
   lcd.begin(16, 2);
   lcd.clear();
+  // pin 4 will be used as ground
+  pinMode(4,OUTPUT);
+  digitalWrite(4,LOW);
+  // pins 3 and 5 will be used to manually move the motor back and forth
+  pinMode(3,INPUT_PULLUP);
+  pinMode(5,INPUT_PULLUP);
 }
 

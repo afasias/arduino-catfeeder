@@ -20,10 +20,15 @@ void setup() {
 
 void loop() {
   cron();
-  uint32_t button = getIRButton(1000);
+  uint32_t button = getIRButton(100);
   switch (button) {
     case BUTTON_MENU: menu_screen(); break;
     default: if (button) Serial.println(button,HEX); break;
+  }
+  if (digitalRead(3) == LOW) {
+    motor_manual_mode(3);
+  } else if (digitalRead(5) == LOW) {
+    motor_manual_mode(5);
   }
 }
 

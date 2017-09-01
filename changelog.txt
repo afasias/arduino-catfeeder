@@ -1,4 +1,8 @@
 
+CatFeeder 4.1  September 1, 2017
+--------------------------------
+* added manual motor operation via push buttons
+
 CatFeeder 4.0  October 20, 2016
 -------------------------------
 * save timetable in EEPROM (again...)

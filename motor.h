@@ -43,4 +43,28 @@ void serve_treat() {
   lcd.print("served...");
   serve_food(TREAT_SERVING_MILLIS);
 }
+void motor_manual_mode( int pin ) {
+  const char *arrows;
+  int step;
+  if (pin == 3) {
+    start_motor();
+    arrows = ">  >  >  >  >  >  ";
+    step = 14;
+  } else {
+    start_motor_reverse();
+    arrows = "<  <  <  <  <  <  ";
+    step = 1;
+  }
+  lcd.clear();
+  lcd.setCursor(2,0);
+  lcd.print("Manual mode:");
+  int pos = 0;
+  while (digitalRead(pin) == LOW) {
+    lcd.setCursor(0,1);
+    pos = (pos+step)%3;
+    lcd.print(arrows+pos);
+    delay(100);
+  }
+  stop_motor();
+}
 
